@@ -13,6 +13,19 @@ from app.keyboards import get_inline_main, inline_back_kb
 
 load_dotenv()
 
+lang_names = {
+            "ru": "🇷🇺 Русский",
+            "en": "🇬🇧 Английский",
+            "zh": "🇨🇳 Китайский",
+            "zh-CN": "🇨🇳 Китайский (упрощённый)",
+            "zh-TW": "🇹🇼 Китайский (традиционный)",
+            "es": "🇪🇸 Испанский",
+            "fr": "🇫🇷 Французский",
+            "de": "🇩🇪 Немецкий",
+            "ja": "🇯🇵 Японский",
+            "ko": "🇰🇷 Корейский"
+            }
+
 dp_router = Router()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -49,33 +62,33 @@ async def download_voice(file_id: str, bot: Bot) -> str: #скачивание �
 
     return file_path
 
-async def transcribe_with_groq(file_path: str) -> str: #распознавание голосового сообщения
+async def transcribe_with_groq(file_path: str) -> tuple: #распознавание голосового сообщения
     try:
         with open(file_path, "rb") as file:
             transcription = groq_client.audio.transcriptions.create(
                 file=(os.path.basename(file_path), file.read()),
                 model="whisper-large-v3-turbo",
-                language="ru",
-                response_format="text",
-                prompt="Ты слышишь фоновую музыку или звуки, которые не являются речью. Не выдумывай слова, просто обозначь это как 'музыка' или 'шум'.",
+                #language="ru", убираем фиксацию на русском языке
+                response_format="verbose_json",
             )
-        return transcription
+        return True, transcription.language, transcription.text
     except Exception as e:
-        return f"Ошибка распознавания: {e}"
+        return False, None, f"Ошибка распознавания: {e}"
 
 @dp_router.message(lambda message: message.voice is not None) #обработчик голосовых сообщений
 async def handle_voice(message: types.Message, bot: Bot):
     processing_msg = await message.answer("Обрабатываю голосовое сообщение...")
     try:
         file_path = await download_voice(message.voice.file_id, bot)
-        text = await transcribe_with_groq(file_path)
+        success, detected_lang, text = await transcribe_with_groq(file_path)
         os.remove(file_path)
 
-        if text and not text.startswith("Ошибка"):
+        if success and text.strip():
+            lang_display = lang_names.get(detected_lang, f"{detected_lang}")
             await processing_msg.delete()
-            await message.answer(f"Распознанный текст:\n\n{text}", parse_mode="Markdown")
+            await message.answer(f"Язык: {lang_display}\n\nРаспознанный текст:\n\n{text}", parse_mode="Markdown")
         else:
-            await processing_msg.edit_text(text)
+            await processing_msg.edit_text(text) 
     except Exception as e:
         await processing_msg.edit_text(f"Произошла ошибка: {e}")
         
@@ -85,12 +98,13 @@ async def handle_audio(message: types.Message, bot: Bot):
     processing_msg = await message.answer("Обрабатываю аудио сообщение...")
     try:
         file_path = await download_voice(message.audio.file_id, bot)
-        text = await transcribe_with_groq(file_path)
+        success, detected_lang, text = await transcribe_with_groq(file_path)
         os.remove(file_path)
 
-        if text and not text.startswith("Ошибка"):
+        if success and text.strip():
+            lang_display = lang_names.get(detected_lang, f"{detected_lang}")
             await processing_msg.delete()
-            await message.answer(f"Распознанный текст:\n\n{text}", parse_mode="Markdown")
+            await message.answer(f"Язык: {lang_display}\n\nРаспознанный текст:\n\n{text}", parse_mode="Markdown")
         else:
             await processing_msg.edit_text(text)
     except Exception as e:
